@@ -1,0 +1,152 @@
+---
+title: "Airlines"
+author: "Alena Zhukouskaya"
+date: "26 04 2022"
+output: pdf_document
+---
+
+\begin{center}
+Uni Databases Project - Airlines
+\end{center}
+\begin{center}Project presenting commands together with generated tables from the analysis of the database on flight delays in the USA in July 2017
+\end{center}
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+install.packages("odbc")
+install.packages("DBI")
+install.packages("keyring")
+library(odbc)
+library(DBI)
+library(keyring)
+```
+
+```{r, echo=FALSE}
+con <- dbConnect(drv = odbc(),
+                 Driver   = "SQL Server",
+                 Server   = "Server",
+                 Database = "Database",
+                 UID      = "UID",
+                 PWD      = key_get("", ""),
+                 Port     = Port)
+```
+
+### Question 1: What was the average delay?
+
+```{sql connection=con}
+  select avg(FD.arr_delay_new) as avg_delay
+  from Flight_delays FD
+```
+
+### Question 2: What was the maximum delay?
+
+```{sql connection=con}
+  select max(FD.arr_delay_new) as max_delay
+  from Flight_delays FD
+```
+
+### Question 3: Which flight was delayed the most?
+
+```{sql connection=con}
+  select FD.fl_date, FD.arr_delay_new, FD.carrier,  FD.origin_city_name, FD.dest_city_name
+    from Flight_delays FD
+    where FD.arr_delay_new=(select max(arr_delay_new)
+    from Flight_delays)
+```
+
+### Question 4: Which days of the week are the worst to travel?
+
+```{sql connection=con}
+  select 
+    case FD.day_of_week
+    when 1 then 'Monday'
+    when 2 then 'Tuesday'
+    when 3 then 'Wednesday'
+    when 4 then 'Thursday'
+    when 5 then 'Friday'
+    when 6 then 'Saturday'
+    when 7 then 'Sunday'
+    end as weekday_name,
+    avg(FD.arr_delay_new) as avg_delay
+  from Flight_delays FD
+  group by FD.day_of_week
+  order by avg(FD.arr_delay_new) desc
+```
+
+### Question 5: Which airlines flying from San Francisco (SFO) have the fewest arrival delays?
+
+```{sql connection=con}
+  select avg(all isnull(FD.arr_delay_new,0)) as 'avg_delay', A.airline_name
+  from Flight_delays FD inner join Airlines A 
+    on FD.airline_id=A.airline_id
+  where A.airline_id in (
+    select airline_id
+    from Flight_delays
+    where origin='SFO')
+  group by A.airline_name
+  order by avg(all isnull(FD.arr_delay_new,0)) desc
+```
+
+### Question 6: What part of the airline has regular delays, i.e. its flight has an average of at least 10 minutes delays?
+
+```{sql connection=con}
+  select cast(count(FD.ile) as real)/(select count(distinct airline_id)
+    from Flight_delays) as late_proportion
+  from (select count(*) as 'how many'
+    from Flight_delays
+    group by airline_id
+    having avg(arr_delay_new)>9) as FD
+
+```
+
+### Question 7: How do departure delays affect arrival delays?
+
+```{sql connection=con}
+  SELECT (Avg(dep_delay_new*arr_delay_new)-(Avg(dep_delay_new)*Avg(arr_delay_new)))/
+  (StDevP(dep_delay_new)*StDevP(arr_delay_new))
+  as [Pearsons r]
+  from Flight_delays
+```
+
+### Question 8: Which airline had the biggest increase (difference) in average delay of arrivals in the last week of the month, i.e. between 1-23 and 24-31 July?
+
+```{sql connection=con}
+  select top 1 dt.sr-pt.sr as [delay_increase], A.airline_name
+  from (select airline_id, avg(arr_delay_new) as sr
+    from Flight_delays
+    where day_of_month <= 23 and month=7
+    group by airline_id) as pt
+  inner join
+    (select airline_id, avg(arr_delay_new) as sr
+    from Flight_delays
+    where day_of_month >=24 and day_of_month <=31 and month=7
+    group by airline_id) as dt
+  on pt.airline_id=dt.airline_id
+  inner join Airlines A
+  on dt.airline_id=A.airline_id
+  order by dt.sr-pt.sr desc
+```
+
+### Question 9: Which airlines fly both SFO → PDX (Portland) and SFO → Eugene (Eugene)?
+
+```{sql connection=con}
+  select distinct A.airline_name
+  from Flight_delays FD inner join Airlines A
+    on FD.airline_id=A.airline_id
+  where (FD.origin='SFO' and FD.dest='PDX') and exists (
+    select airline_id
+    from Flight_delays
+    where airline_id=FD.airline_id and origin='SFO' and dest='EUG')
+```
+
+### Question 10: What is the fastest way to get from Chicago to Stanford, assuming departure after 14:00 local time?
+
+```{sql connection=con}
+  select avg(FD.arr_delay_new) as 'avg_delay', FD.origin, FD.dest
+  from Flight_delays FD
+  where (FD.origin='MDW' or FD.origin='ORD')
+    and FD.crs_dep_time>1400
+    and (FD.dest='SFO' or FD.dest='SJC' or FD.dest='OAK')
+  group by FD.origin, FD.dest
+  order by avg(FD.arr_delay_new) desc
+```
