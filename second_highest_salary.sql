@@ -7,10 +7,10 @@ select
         when (
             select count(*)
             from distinct_salaries_cte
-            ) < 2 then NULL
+            ) < 2 then null
         else (
             select * 
-            FROM distinct_salaries_cte
+            from distinct_salaries_cte
             order by salary desc
             limit 1 OFFSET 1
             )
